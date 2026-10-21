@@ -1,0 +1,23 @@
+services:
+  playlist-maker:
+    build: .
+    container_name: playlist-maker
+    restart: ${RESTART_POLICY:-no}
+    environment:
+      MUSIC_ROOT: /music
+      PLAYLIST_ROOT: /playlists
+      DATABASE_PATH: /data/library.db
+      LASTFM_API_KEY: ${ND_LASTFM_APIKEY:-}
+    ports:
+      - "${APP_PORT:-8095}:8000"
+    volumes:
+      - ./data:/data
+      - ${MUSIC_PATH:-/mnt/music}:/music:ro
+      - ${PLAYLIST_PATH:-/mnt/music/Playlists}:/playlists:rw
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
+

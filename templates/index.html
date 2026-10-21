@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Navidrome Playlist Editor</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand-mark">♪</div>
+    <div><p class="eyebrow">NAVIDROME COMPANION</p><h1>Navidrome Playlist Editor</h1></div>
+    <button id="theme" class="icon-button" aria-label="Change color theme">◐</button>
+  </header>
+  <main>
+    <section class="hero">
+      <div><p class="eyebrow">Your Music, Listen How You Want</p><h2>Build a great playlist from the music you already own.</h2><p>Combine charts and listener sources, describe the sound, and Playlist Maker will only keep songs found in your library.</p></div>
+      <div class="library-card">
+        <span class="status-dot"></span><div><strong id="track-count">—</strong><small>songs indexed</small></div>
+        <button id="scan">Scan music library</button>
+        <div class="scan-progress" aria-live="polite">
+          <div class="progress-copy"><small id="scan-note">Checking library…</small><small id="scan-percent"></small></div>
+          <div class="progress-track"><span id="scan-progress-bar"></span></div>
+        </div>
+        <small id="enrichment-note"></small>
+      </div>
+    </section>
+
+    <section class="builder card">
+      <div class="step"><span>1</span><div><h3>Pick one or more sources</h3><p>Songs found by several sources get an agreement boost.</p></div></div>
+      <div class="source-grid" role="group" aria-label="Music sources">
+        <label class="source"><input type="checkbox" name="source" value="billboard" checked><span class="check">✓</span><b>Billboard hits</b><small>Year-end Hot 100 history</small></label>
+        <label class="source"><input type="checkbox" name="source" value="lastfm" checked><span class="check">✓</span><b>Last.fm favorites</b><small>Genre and era listener favorites</small></label>
+        <label class="source"><input type="checkbox" name="source" value="listenbrainz"><span class="check">✓</span><b>ListenBrainz</b><small>Open, all-time community favorites</small></label>
+      </div>
+      <p class="source-help">MusicBrainz quietly improves release years, genres, and matching in the background—no account needed.</p>
+
+      <div class="step"><span>2</span><div><h3>Set the rules</h3><p>These choices are enforced when songs are matched.</p></div></div>
+      <div class="decade-section">
+        <h4>Decades <small>Select one or more</small></h4>
+        <div id="decades" class="choice-chips decade-chips">
+          <label><input type="checkbox" value="any" checked><span>Any decade</span></label>
+          <label><input type="checkbox" value="1960"><span>1960s</span></label>
+          <label><input type="checkbox" value="1970"><span>1970s</span></label>
+          <label><input type="checkbox" value="1980"><span>1980s</span></label>
+          <label><input type="checkbox" value="1990"><span>1990s</span></label>
+          <label><input type="checkbox" value="2000"><span>2000s</span></label>
+          <label><input type="checkbox" value="2010"><span>2010s</span></label>
+          <label><input type="checkbox" value="2020"><span>2020s</span></label>
+        </div>
+      </div>
+      <div class="filter-grid">
+        <label>Popularity<select id="popularity"><option value="mixed">Big Hits and Still Popular Today</option><option value="hits">Big Hits When Released</option><option value="enduring">Still Popular Today</option></select></label>
+        <label>Song mix<select id="variety"><option value="balanced">Balanced</option><option value="familiar">Mostly familiar</option><option value="adventurous">More adventurous</option></select></label>
+        <label>Maximum per artist<select id="max-per-artist"><option value="1">1 song</option><option value="2" selected>2 songs</option><option value="3">3 songs</option><option value="5">5 songs</option><option value="0">Unlimited</option></select></label>
+        <label>Matching<select id="strictness"><option value="strict">Strict — fewer songs if needed</option><option value="flexible">Flexible — allow unknown metadata</option></select></label>
+      </div>
+
+      <div class="genre-section">
+        <h4>Include genres <small>Optional</small></h4>
+        <div id="include-genres" class="choice-chips">
+          <label><input type="checkbox" value="rock"><span>Rock</span></label><label><input type="checkbox" value="classic rock"><span>Classic rock</span></label><label><input type="checkbox" value="alternative"><span>Alternative</span></label><label><input type="checkbox" value="new wave"><span>New wave</span></label><label><input type="checkbox" value="punk"><span>Punk</span></label><label><input type="checkbox" value="grunge"><span>Grunge</span></label><label><input type="checkbox" value="metal"><span>Metal</span></label><label><input type="checkbox" value="pop"><span>Pop</span></label><label><input type="checkbox" value="soul"><span>Soul</span></label><label><input type="checkbox" value="funk"><span>Funk</span></label><label><input type="checkbox" value="disco"><span>Disco</span></label><label><input type="checkbox" value="country"><span>Country</span></label><label><input type="checkbox" value="rap / hip-hop"><span>Rap / hip-hop</span></label><label><input type="checkbox" value="r&b"><span>R&amp;B</span></label><label><input type="checkbox" value="electronic"><span>Electronic</span></label><label><input type="checkbox" value="blues"><span>Blues</span></label><label><input type="checkbox" value="jazz"><span>Jazz</span></label><label><input type="checkbox" value="folk"><span>Folk</span></label>
+        </div>
+      </div>
+      <details class="exclude-panel"><summary>Exclude genres or special versions <span>Optional</span></summary>
+        <h4>Never include these genres</h4>
+        <div id="exclude-genres" class="choice-chips exclude-chips">
+          <label><input type="checkbox" value="rock"><span>Rock</span></label><label><input type="checkbox" value="classic rock"><span>Classic rock</span></label><label><input type="checkbox" value="alternative"><span>Alternative</span></label><label><input type="checkbox" value="new wave"><span>New wave</span></label><label><input type="checkbox" value="punk"><span>Punk</span></label><label><input type="checkbox" value="grunge"><span>Grunge</span></label><label><input type="checkbox" value="metal"><span>Metal</span></label><label><input type="checkbox" value="pop"><span>Pop</span></label><label><input type="checkbox" value="soul"><span>Soul</span></label><label><input type="checkbox" value="funk"><span>Funk</span></label><label><input type="checkbox" value="disco"><span>Disco</span></label><label><input type="checkbox" value="country"><span>Country</span></label><label><input type="checkbox" value="rap / hip-hop"><span>Rap / hip-hop</span></label><label><input type="checkbox" value="r&b"><span>R&amp;B</span></label><label><input type="checkbox" value="electronic"><span>Electronic</span></label><label><input type="checkbox" value="blues"><span>Blues</span></label><label><input type="checkbox" value="jazz"><span>Jazz</span></label><label><input type="checkbox" value="folk"><span>Folk</span></label>
+        </div>
+        <h4>Avoid these versions</h4>
+        <div id="avoid-versions" class="choice-chips"><label><input type="checkbox" value="live" checked><span>Live recordings</span></label><label><input type="checkbox" value="remix" checked><span>Remixes</span></label><label><input type="checkbox" value="karaoke" checked><span>Karaoke / tribute</span></label></div>
+      </details>
+
+      <div class="step"><span>3</span><div><h3>Add seed songs <small class="optional">Optional</small></h3><p>Choose up to five songs from your library for similar listener and genre recommendations.</p></div></div>
+      <div class="seed-search-wrap"><input id="seed-search" autocomplete="off" placeholder="Search by song or artist"><div id="seed-suggestions" class="seed-suggestions hidden"></div></div>
+      <div id="selected-seeds" class="selected-seeds"><span class="empty-note">No seed songs selected</span></div>
+      <label class="inline-check"><input id="include-seeds" type="checkbox"><span>Include the selected seed songs in the finished playlist</span></label>
+
+      <div class="step"><span>4</span><div><h3>Anything else you want? <small class="optional">Optional</small></h3><p>Add mood, setting, or extra details in plain language.</p></div></div>
+      <textarea id="prompt" rows="3" placeholder="Try “upbeat songs for driving” or “guitar-driven songs with female vocalists”"></textarea>
+      <div class="chips">
+        <button data-prompt="Upbeat songs for driving">Driving</button><button data-prompt="Mostly guitar-driven">Guitar-driven</button><button data-prompt="Avoid slow songs">Avoid slow songs</button><button data-prompt="Include female vocalists">Female vocalists</button>
+      </div>
+
+      <div class="interpretation"><p class="eyebrow">WHAT THE APP WILL USE</p><p id="interpretation-text">Any decade · Big Hits and Still Popular Today · Maximum 2 per artist · Strict metadata</p></div>
+
+      <div class="step"><span>5</span><div><h3>Choose the length</h3><p>The finished list may be shorter rather than breaking strict rules.</p></div></div>
+      <div class="lengths">
+        <label><input type="radio" name="limit" value="25">25</label><label class="active"><input type="radio" name="limit" value="50" checked>50</label><label><input type="radio" name="limit" value="100">100</label><label><input type="radio" name="limit" value="250">250</label><label><input type="radio" name="limit" value="500">500</label>
+      </div>
+      <button id="find" class="primary">Find songs in my library <span>→</span></button>
+      <div id="build-progress" class="task-progress hidden" aria-live="polite">
+        <div class="progress-copy"><strong id="build-label">Contacting music sources…</strong><small>This can take a minute for large playlists.</small></div>
+        <div class="progress-track indeterminate"><span></span></div>
+      </div>
+      <p id="message" class="message" aria-live="polite"></p>
+    </section>
+
+    <section id="results" class="card hidden">
+      <div class="result-head"><div><p class="eyebrow">MATCHED TO YOUR LIBRARY</p><h2><span id="match-count">0</span> songs found</h2></div><button id="toggle-all" class="quiet">Select all</button></div>
+      <div id="song-list" class="song-list"></div>
+      <div class="save-bar"><label>Playlist name<input id="playlist-name" maxlength="120" placeholder="My new playlist"></label><button id="save" class="primary">Create playlist</button></div>
+      <div id="save-status" class="save-status hidden" role="status" aria-live="polite">
+        <span class="success-mark">✓</span>
+        <div><strong id="save-title">Playlist created</strong><p id="save-message"></p><small>Next: Navidrome will discover this file during its next hourly music scan. Run a Navidrome scan if you want it to appear immediately.</small></div>
+      </div>
+    </section>
+
+    <section class="existing card"><div><p class="eyebrow">IN THE PLAYLISTS FOLDER</p><h2>Existing playlists</h2></div><div id="playlists" class="playlist-list"><span>Loading…</span></div></section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
+
