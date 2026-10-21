@@ -8,6 +8,9 @@ services:
       PLAYLIST_ROOT: /playlists
       DATABASE_PATH: /data/library.db
       LASTFM_API_KEY: ${ND_LASTFM_APIKEY:-}
+      MUSIC_HOST_PATH: ${MUSIC_PATH:-/mnt/music}
+      PLAYLIST_HOST_PATH: ${PLAYLIST_PATH:-/mnt/music/Playlists}
+      PLAYLIST_LIBRARY_PATH: ${PLAYLIST_LIBRARY_PATH:-Playlists}
     ports:
       - "${APP_PORT:-8095}:8000"
     volumes:

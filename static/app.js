@@ -4,6 +4,9 @@ let currentMatches = [];
 let selectedSeeds = [];
 let scanTimer;
 let seedTimer;
+let folderDraft = {music_subpath:'', playlist_subpath:'', music_display:'', playlist_display:''};
+let browserKind = '';
+let browserPath = '';
 
 function setMessage(text, error=false){ const el=$('#message'); el.textContent=text; el.classList.toggle('error',error); }
 function escapeHtml(value){ const div=document.createElement('div'); div.textContent=value??''; return div.innerHTML; }
@@ -68,11 +71,69 @@ async function loadStatus(){
     }
     const enrich=status.enrichment||{};
     $('#enrichment-note').textContent=enrich.running?`MusicBrainz: ${Number(enrich.checked).toLocaleString()} checked, ${Number(enrich.enriched).toLocaleString()} enriched`:enrich.error?`MusicBrainz paused: ${enrich.error}`:status.musicbrainz_remaining?'MusicBrainz enrichment is cached and continues after scans':'';
-    $('#playlists').innerHTML=status.playlists.length?status.playlists.map(p=>`<span>♪ ${escapeHtml(p)}</span>`).join(''):'<span>No .m3u8 playlists yet</span>';
+    folderDraft={...folderDraft,...(status.folders||{})};
+    $('#music-folder-display').textContent=folderDraft.music_display||'Music library';
+    $('#playlist-folder-display').textContent=folderDraft.playlist_display||'Playlists folder';
+    $('#playlists').innerHTML=status.playlists.length?status.playlists.map(p=>`<div class="playlist-item"><span>♪ ${escapeHtml(p)}</span><button type="button" class="delete-playlist" data-playlist="${escapeHtml(p)}" aria-label="Delete ${escapeHtml(p)}">Delete</button></div>`).join(''):'<span>No .m3u8 playlists yet</span>';
   }catch{ $('#scan-note').textContent='Could not read app status'; }
 }
 
 $('#scan').addEventListener('click',async()=>{ $('#scan').disabled=true; await fetch('/api/scan',{method:'POST'}); loadStatus(); });
+
+async function openFolderBrowser(kind,path=''){
+  browserKind=kind; browserPath=path;
+  const browser=$('#folder-browser'); browser.classList.remove('hidden');
+  $('#folder-browser-kind').textContent=kind==='music'?'Music library':'Playlists save location';
+  $('#folder-list').innerHTML='<span class="empty-note">Loading folders…</span>';
+  try{
+    const params=new URLSearchParams({kind,path});
+    const response=await fetch(`/api/folders?${params}`); const data=await response.json();
+    if(!response.ok)throw new Error(data.error||'Could not open that folder.');
+    browserPath=data.path; $('#folder-browser-path').textContent=data.display;
+    $('#folder-up').disabled=data.parent===null; $('#folder-up').dataset.parent=data.parent??'';
+    $('#folder-list').innerHTML=data.folders.length?data.folders.map(folder=>`<button type="button" class="folder-row" data-folder-path="${escapeHtml(folder.path)}"><span>📁</span><b>${escapeHtml(folder.name)}</b><span>›</span></button>`).join(''):'<span class="empty-note">No folders inside this location</span>';
+    if(data.truncated)$('#folder-list').insertAdjacentHTML('beforeend','<span class="empty-note">Showing the first 1,000 folders</span>');
+  }catch(error){ $('#folder-list').innerHTML=`<span class="empty-note">${escapeHtml(error.message)}</span>`; }
+}
+
+$('#settings').addEventListener('click',()=>{
+  $('#settings-message').textContent=''; $('#folder-browser').classList.add('hidden');
+  $('#settings-dialog').showModal();
+});
+$('#close-settings').addEventListener('click',()=>$('#settings-dialog').close());
+$('#cancel-settings').addEventListener('click',()=>$('#settings-dialog').close());
+$('#settings-dialog').addEventListener('close',()=>{ $('#folder-browser').classList.add('hidden'); loadStatus(); });
+$$('[data-browse-kind]').forEach(button=>button.addEventListener('click',()=>openFolderBrowser(button.dataset.browseKind,folderDraft[`${button.dataset.browseKind==='music'?'music':'playlist'}_subpath`]||'')));
+$('#folder-up').addEventListener('click',event=>openFolderBrowser(browserKind,event.currentTarget.dataset.parent||''));
+$('#folder-list').addEventListener('click',event=>{ const row=event.target.closest('[data-folder-path]'); if(row)openFolderBrowser(browserKind,row.dataset.folderPath); });
+$('#select-folder').addEventListener('click',()=>{
+  const prefix=browserKind==='music'?'music':'playlist'; folderDraft[`${prefix}_subpath`]=browserPath;
+  folderDraft[`${prefix}_display`]=$('#folder-browser-path').textContent;
+  $(`#${prefix}-folder-display`).textContent=folderDraft[`${prefix}_display`];
+  $('#folder-browser').classList.add('hidden');
+});
+$('#save-settings').addEventListener('click',async()=>{
+  const button=$('#save-settings'); button.disabled=true; $('#settings-message').className='settings-message'; $('#settings-message').textContent='Saving folder settings…';
+  try{
+    const response=await fetch('/api/settings/folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({music_subpath:folderDraft.music_subpath,playlist_subpath:folderDraft.playlist_subpath})});
+    const data=await response.json(); if(!response.ok)throw new Error(data.error||'Could not save folder settings.');
+    folderDraft={...folderDraft,...data.folders}; $('#settings-message').textContent=data.message; await loadStatus();
+    if(data.library_changed){ setTimeout(()=>{ $('#settings-dialog').close(); $('.library-card').scrollIntoView({behavior:'smooth',block:'center'}); },900); }
+  }catch(error){ $('#settings-message').className='settings-message error'; $('#settings-message').textContent=error.message; }
+  finally{ button.disabled=false; }
+});
+
+$('#playlists').addEventListener('click',async event=>{
+  const button=event.target.closest('[data-playlist]'); if(!button)return;
+  const filename=button.dataset.playlist;
+  if(!window.confirm(`Delete “${filename}”?\n\nIt will be removed from the playlists folder. A recovery copy will be kept by the app.`))return;
+  button.disabled=true; button.textContent='Deleting…';
+  try{
+    const response=await fetch(`/api/playlists/${encodeURIComponent(filename)}`,{method:'DELETE'}); const data=await response.json();
+    if(!response.ok)throw new Error(data.error||'Could not delete the playlist.');
+    $('#playlist-message').className='playlist-message'; $('#playlist-message').textContent=`${filename} was deleted. A recovery copy was saved.`; await loadStatus();
+  }catch(error){ $('#playlist-message').className='playlist-message error'; $('#playlist-message').textContent=error.message; button.disabled=false; button.textContent='Delete'; }
+});
 
 $$('[data-prompt]').forEach(button=>button.addEventListener('click',()=>{ $('#prompt').value=button.dataset.prompt; updateInterpretation(); $('#prompt').focus(); }));
 

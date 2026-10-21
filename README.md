@@ -13,6 +13,8 @@ writes portable `.m3u8` playlists that Navidrome can import during its next scan
 - Add up to five local seed songs for similar-listener recommendations.
 - Add plain-language preferences such as `upbeat songs for driving`.
 - Preview, deselect, name, create, and update playlists from the browser.
+- Choose the active library and playlist subfolders from a safe folder browser.
+- Delete playlist files with confirmation; recovery copies are kept in app data.
 - Rescan the local library incrementally with visible progress.
 - Gradually cache MusicBrainz release-year and genre enrichment.
 
@@ -30,6 +32,13 @@ cp .env.example .env
 
 Edit `.env` and set `MUSIC_PATH` and `PLAYLIST_PATH` to host paths. The optional
 `ND_LASTFM_APIKEY` enables the Last.fm source and seed-song recommendations.
+`PLAYLIST_PATH` must be inside `MUSIC_PATH`. If it is not the direct `Playlists`
+child, set `PLAYLIST_LIBRARY_PATH` to its path relative to `MUSIC_PATH`.
+
+On Windows Docker hosts, `MUSIC_PATH` and `PLAYLIST_PATH` may be drive-letter
+paths or Docker-accessible UNC paths. A web browser cannot grant the container
+access to a new drive or share: configure those two mounts in `.env` first, then
+use the gear button in the app to choose the root or a subfolder within them.
 
 The supplied Compose file joins an external Docker network named `proxy`. Create
 it once if your host does not already have it:
@@ -67,6 +76,8 @@ Only the Last.fm API key is passed into the container. Do not commit `.env`.
 - The full music library is mounted read-only at `/music`.
 - Only the configured playlist folder is mounted read/write at `/playlists`.
 - The SQLite index lives in `data/library.db` and stores paths and tags, not audio.
+- Deleted playlists are removed from the music share and copied to
+  `data/deleted-playlists/` for recovery.
 - `.env`, `data/`, backups, caches, and compiled files are excluded from Git and
   Docker build context.
 - Original release accuracy depends on library tags and cached MusicBrainz data;

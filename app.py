@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import html
 import os
+import posixpath
 import re
+import shutil
 import sqlite3
 import threading
 import time
@@ -22,6 +24,10 @@ APP = Flask(__name__)
 MUSIC_ROOT = Path(os.getenv("MUSIC_ROOT", "/music"))
 PLAYLIST_ROOT = Path(os.getenv("PLAYLIST_ROOT", "/playlists"))
 DB_PATH = Path(os.getenv("DATABASE_PATH", "/data/library.db"))
+DELETED_PLAYLIST_ROOT = DB_PATH.parent / "deleted-playlists"
+MUSIC_HOST_PATH = os.getenv("MUSIC_HOST_PATH", "Music library")
+PLAYLIST_HOST_PATH = os.getenv("PLAYLIST_HOST_PATH", "Playlists folder")
+PLAYLIST_LIBRARY_PATH = os.getenv("PLAYLIST_LIBRARY_PATH", "Playlists").strip("/\\") or "Playlists"
 AUDIO_EXTENSIONS = {".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".wma", ".aiff", ".ape"}
 USER_AGENT = "Navidrome-Playlist-Editor/1.0 (https://github.com/jeffavery/navidrome-playlist-editor)"
 GENRE_ALIASES = {
@@ -99,6 +105,56 @@ def init_db():
                 db.execute(f"ALTER TABLE tracks ADD COLUMN {name} {declaration}")
 
 
+def normalize_subpath(value):
+    value = str(value or "").strip().replace("\\", "/").strip("/")
+    if not value:
+        return ""
+    parts = value.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("Choose a folder inside the configured location.")
+    return "/".join(parts)
+
+
+def mounted_folder(root, relative=""):
+    relative = normalize_subpath(relative)
+    base = root.resolve()
+    candidate = (base / relative).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError as exc:
+        raise ValueError("Choose a folder inside the configured location.") from exc
+    if not candidate.is_dir():
+        raise ValueError("That folder is not available to the app.")
+    return candidate
+
+
+def folder_settings():
+    with database() as db:
+        settings = dict(db.execute(
+            "SELECT key,value FROM settings WHERE key IN ('music_subpath','playlist_subpath')"
+        ))
+    return {
+        "music_subpath": normalize_subpath(settings.get("music_subpath", "")),
+        "playlist_subpath": normalize_subpath(settings.get("playlist_subpath", "")),
+    }
+
+
+def active_folders():
+    settings = folder_settings()
+    return (
+        mounted_folder(MUSIC_ROOT, settings["music_subpath"]),
+        mounted_folder(PLAYLIST_ROOT, settings["playlist_subpath"]),
+        settings,
+    )
+
+
+def display_folder(host_root, relative):
+    if not relative:
+        return host_root
+    separator = "\\" if "\\" in host_root and "/" not in host_root else "/"
+    return host_root.rstrip("/\\") + separator + relative.replace("/", separator)
+
+
 def norm(value):
     value = unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode()
     value = re.sub(r"\b(feat|featuring|ft)\.?\b.*$", "", value, flags=re.I)
@@ -117,9 +173,9 @@ def first_tag(tags, names):
     return ""
 
 
-def fallback_metadata(path):
+def fallback_metadata(path, music_root):
     stem = re.sub(r"^\s*\d+[ ._-]+", "", path.stem).strip()
-    artist = path.parent.parent.name if path.parent.parent != MUSIC_ROOT else path.parent.name
+    artist = path.parent.parent.name if path.parent.parent != music_root else path.parent.name
     title = stem
     if " - " in stem:
         possible_artist, possible_title = stem.split(" - ", 1)
@@ -128,8 +184,8 @@ def fallback_metadata(path):
     return title, artist
 
 
-def read_metadata(path):
-    title, artist = fallback_metadata(path)
+def read_metadata(path, music_root):
+    title, artist = fallback_metadata(path, music_root)
     album = path.parent.name
     year = None
     genre = ""
@@ -150,6 +206,7 @@ def read_metadata(path):
 
 def run_scan():
     with scan_lock:
+        music_root, playlist_root, _ = active_folders()
         with database() as db:
             previous_count = db.execute("SELECT value FROM settings WHERE key='last_scan_count'").fetchone()
         total_hint = int(previous_count[0]) if previous_count and previous_count[0].isdigit() else 0
@@ -160,8 +217,8 @@ def run_scan():
             batch = []
             with database() as db:
                 known_modified = {row["path"]: row["modified"] for row in db.execute("SELECT path,modified FROM tracks")}
-            for base, dirs, files in os.walk(MUSIC_ROOT, onerror=lambda _: None):
-                if Path(base) == PLAYLIST_ROOT or Path(base).name == "Playlists":
+            for base, dirs, files in os.walk(music_root, onerror=lambda _: None):
+                if Path(base) == playlist_root or Path(base).name.casefold() == "playlists":
                     dirs[:] = []
                     continue
                 for filename in files:
@@ -170,7 +227,7 @@ def run_scan():
                         continue
                     scan_state["scanned"] += 1
                     try:
-                        relative = path.relative_to(MUSIC_ROOT).as_posix()
+                        relative = path.relative_to(music_root).as_posix()
                         modified = path.stat().st_mtime
                     except (OSError, ValueError):
                         continue
@@ -178,7 +235,7 @@ def run_scan():
                     if known_modified.get(relative) == modified:
                         scan_state["indexed"] += 1
                         continue
-                    title, artist, album, year, genre = read_metadata(path)
+                    title, artist, album, year, genre = read_metadata(path, music_root)
                     batch.append((relative, title, artist, album, year, genre, modified, norm(title), norm(artist)))
                     scan_state["changed"] += 1
                     if len(batch) >= 250:
@@ -644,13 +701,87 @@ def status():
         settings = dict(db.execute("SELECT key,value FROM settings"))
     playlists = []
     try:
-        playlists = sorted((p.name for p in PLAYLIST_ROOT.glob("*.m3u8")), key=str.casefold)
-    except OSError:
-        pass
+        _, playlist_root, folder_config = active_folders()
+        playlists = sorted((p.name for p in playlist_root.glob("*.m3u8") if p.is_file()), key=str.casefold)
+    except (OSError, ValueError):
+        folder_config = folder_settings()
     return jsonify(track_count=count, last_scan=settings.get("last_scan"),
                    last_scan_count=settings.get("last_scan_count"), scan=scan_state,
                    enrichment=enrichment_state, musicbrainz_remaining=settings.get("musicbrainz_remaining"),
-                   playlists=playlists, lastfm_configured=bool(os.getenv("LASTFM_API_KEY", "").strip()))
+                   playlists=playlists, lastfm_configured=bool(os.getenv("LASTFM_API_KEY", "").strip()),
+                   folders={
+                       **folder_config,
+                       "music_display": display_folder(MUSIC_HOST_PATH, folder_config["music_subpath"]),
+                       "playlist_display": display_folder(PLAYLIST_HOST_PATH, folder_config["playlist_subpath"]),
+                   })
+
+
+@APP.get("/api/folders")
+def browse_folders():
+    kind = request.args.get("kind", "")
+    if kind not in {"music", "playlists"}:
+        return jsonify(error="Choose either the music or playlists location."), 400
+    root = MUSIC_ROOT if kind == "music" else PLAYLIST_ROOT
+    host_root = MUSIC_HOST_PATH if kind == "music" else PLAYLIST_HOST_PATH
+    try:
+        relative = normalize_subpath(request.args.get("path", ""))
+        current = mounted_folder(root, relative)
+        folders = []
+        for child in sorted(current.iterdir(), key=lambda item: item.name.casefold()):
+            if child.name.startswith("."):
+                continue
+            try:
+                resolved = child.resolve()
+                resolved.relative_to(root.resolve())
+            except (OSError, ValueError):
+                continue
+            if resolved.is_dir():
+                child_relative = resolved.relative_to(root.resolve()).as_posix()
+                folders.append({"name": child.name, "path": child_relative})
+        parent = posixpath.dirname(relative) if relative else None
+        return jsonify(kind=kind, path=relative, parent=parent, folders=folders[:1000],
+                       display=display_folder(host_root, relative), truncated=len(folders) > 1000)
+    except (OSError, ValueError) as exc:
+        return jsonify(error=str(exc)), 400
+
+
+@APP.post("/api/settings/folders")
+def save_folder_settings():
+    if scan_state["running"] or enrichment_state["running"]:
+        return jsonify(error="Wait for the current library task to finish before changing folders."), 409
+    payload = request.get_json(force=True) or {}
+    try:
+        music_subpath = normalize_subpath(payload.get("music_subpath", ""))
+        playlist_subpath = normalize_subpath(payload.get("playlist_subpath", ""))
+        mounted_folder(MUSIC_ROOT, music_subpath)
+        playlist_folder = mounted_folder(PLAYLIST_ROOT, playlist_subpath)
+    except (OSError, ValueError) as exc:
+        return jsonify(error=str(exc)), 400
+    if not os.access(playlist_folder, os.W_OK):
+        return jsonify(error="The selected playlists folder is not writable."), 400
+
+    current = folder_settings()
+    library_changed = music_subpath != current["music_subpath"]
+    with database() as db:
+        db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('music_subpath',?)", (music_subpath,))
+        db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('playlist_subpath',?)", (playlist_subpath,))
+        if library_changed:
+            db.execute("DELETE FROM tracks")
+            db.execute("DELETE FROM settings WHERE key IN ('last_scan','last_scan_count','musicbrainz_remaining')")
+    if library_changed:
+        scan_state.update(running=False, scanned=0, indexed=0, total=0, changed=0, removed=0,
+                          error=None, started=None, finished=None, phase="idle")
+    return jsonify(
+        message="Folder settings saved. Scan the music library to build the new index."
+        if library_changed else "Folder settings saved.",
+        library_changed=library_changed,
+        folders={
+            "music_subpath": music_subpath,
+            "playlist_subpath": playlist_subpath,
+            "music_display": display_folder(MUSIC_HOST_PATH, music_subpath),
+            "playlist_display": display_folder(PLAYLIST_HOST_PATH, playlist_subpath),
+        },
+    )
 
 
 @APP.get("/api/tracks/search")
@@ -766,12 +897,18 @@ def create_playlist():
     selected = [p for p in paths if isinstance(p, str) and p in valid]
     if not selected:
         return jsonify(error="None of the selected songs are in the current library index."), 400
-    target = PLAYLIST_ROOT / f"{name}.m3u8"
+    _, playlist_root, folder_config = active_folders()
+    target = playlist_root / f"{name}.m3u8"
     existed = target.exists()
-    temporary = PLAYLIST_ROOT / f".{name}.{os.getpid()}.tmp"
+    temporary = playlist_root / f".{name}.{os.getpid()}.tmp"
     try:
-        PLAYLIST_ROOT.mkdir(parents=True, exist_ok=True)
-        content = "#EXTM3U\n" + "".join(f"../{path}\n" for path in selected)
+        playlist_root.mkdir(parents=True, exist_ok=True)
+        logical_playlist_folder = posixpath.join(PLAYLIST_LIBRARY_PATH, folder_config["playlist_subpath"])
+        entries = (
+            posixpath.relpath(posixpath.join(folder_config["music_subpath"], path), logical_playlist_folder)
+            for path in selected
+        )
+        content = "#EXTM3U\n" + "".join(f"{entry}\n" for entry in entries)
         temporary.write_text(content, encoding="utf-8", newline="\n")
         temporary.replace(target)
     except OSError as exc:
@@ -780,6 +917,27 @@ def create_playlist():
     action = "Updated" if existed else "Created"
     return jsonify(message=f"{action} {target.name}", filename=target.name,
                    songs=len(selected), action=action.lower())
+
+
+@APP.delete("/api/playlists/<path:filename>")
+def delete_playlist(filename):
+    filename = unquote(filename)
+    if Path(filename).name != filename or not filename.lower().endswith(".m3u8"):
+        return jsonify(error="Choose a valid playlist file."), 400
+    try:
+        _, playlist_root, _ = active_folders()
+        target = playlist_root / filename
+        if not target.is_file():
+            return jsonify(error="That playlist no longer exists."), 404
+        DELETED_PLAYLIST_ROOT.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+        recovery = DELETED_PLAYLIST_ROOT / f"{stamp}--{filename}"
+        shutil.copy2(target, recovery)
+        target.unlink()
+    except OSError as exc:
+        return jsonify(error=f"Could not delete the playlist: {exc}"), 500
+    return jsonify(message=f"Deleted {filename}", filename=filename,
+                   recovery_copy=recovery.name)
 
 
 if __name__ == "__main__":

@@ -10,11 +10,34 @@
   <header>
     <div class="brand-mark">♪</div>
     <div><p class="eyebrow">NAVIDROME COMPANION</p><h1>Navidrome Playlist Editor</h1></div>
-    <button id="theme" class="icon-button" aria-label="Change color theme">◐</button>
+    <div class="header-actions">
+      <button id="settings" class="icon-button" aria-label="Open folder settings" title="Folder settings">⚙</button>
+      <button id="theme" class="icon-button" aria-label="Change color theme" title="Change color theme">◐</button>
+    </div>
   </header>
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <div class="dialog-head"><div><p class="eyebrow">SETTINGS</p><h2 id="settings-title">Library folders</h2></div><button id="close-settings" class="icon-button" aria-label="Close settings">×</button></div>
+    <p class="settings-help">Choose from folders that Docker has made available to this app. To use a different drive letter or UNC share, change the host folder in the app's Docker configuration first.</p>
+    <div class="folder-setting">
+      <div><strong>Music library</strong><small id="music-folder-display">Loading…</small></div>
+      <button type="button" class="quiet" data-browse-kind="music">Choose folder</button>
+    </div>
+    <div class="folder-setting">
+      <div><strong>Playlists save location</strong><small id="playlist-folder-display">Loading…</small></div>
+      <button type="button" class="quiet" data-browse-kind="playlists">Choose folder</button>
+    </div>
+    <div id="folder-browser" class="folder-browser hidden">
+      <div class="folder-browser-head"><button id="folder-up" type="button" class="quiet">← Up</button><div><small>SELECTING</small><strong id="folder-browser-kind"></strong></div></div>
+      <code id="folder-browser-path"></code>
+      <div id="folder-list" class="folder-list"></div>
+      <button id="select-folder" type="button" class="primary">Use this folder</button>
+    </div>
+    <p id="settings-message" class="settings-message" role="status" aria-live="polite"></p>
+    <div class="dialog-actions"><button id="cancel-settings" type="button" class="quiet">Cancel</button><button id="save-settings" type="button" class="primary">Save settings</button></div>
+  </dialog>
   <main>
     <section class="hero">
-      <div><p class="eyebrow">Your Music, Listen How You Want</p><h2>Build a great playlist from the music you already own.</h2><p>Combine charts and listener sources, describe the sound, and Playlist Maker will only keep songs found in your library.</p></div>
+      <div><p class="eyebrow">Your Music, Listen How You Want</p><h2>Build a great playlist from the music you already own.</h2><p>Combine charts and listener sources, describe the sound, and Navidrome Playlist Editor will only keep songs found in your library.</p></div>
       <div class="library-card">
         <span class="status-dot"></span><div><strong id="track-count">—</strong><small>songs indexed</small></div>
         <button id="scan">Scan music library</button>
@@ -106,7 +129,7 @@
       </div>
     </section>
 
-    <section class="existing card"><div><p class="eyebrow">IN THE PLAYLISTS FOLDER</p><h2>Existing playlists</h2></div><div id="playlists" class="playlist-list"><span>Loading…</span></div></section>
+    <section class="existing card"><div><p class="eyebrow">IN THE PLAYLISTS FOLDER</p><h2>Existing playlists</h2><small class="playlist-help">Delete removes the file from Navidrome's playlist folder after confirmation. The app keeps a recovery copy.</small><p id="playlist-message" class="playlist-message" role="status" aria-live="polite"></p></div><div id="playlists" class="playlist-list"><span>Loading…</span></div></section>
   </main>
   <script src="/static/app.js"></script>
 </body>
