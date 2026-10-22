@@ -7,6 +7,8 @@ let seedTimer;
 let folderDraft = {music_subpath:'', playlist_subpath:'', music_display:'', playlist_display:''};
 let browserKind = '';
 let browserPath = '';
+let desktopMode = false;
+let rootsConfigured = true;
 
 function setMessage(text, error=false){ const el=$('#message'); el.textContent=text; el.classList.toggle('error',error); }
 function escapeHtml(value){ const div=document.createElement('div'); div.textContent=value??''; return div.innerHTML; }
@@ -45,6 +47,10 @@ function updateInterpretation(parts){
 async function loadStatus(){
   try{
     const status=await fetch('/api/status').then(r=>r.json());
+    desktopMode=Boolean(status.desktop_mode); rootsConfigured=Boolean(status.roots_configured);
+    $('#settings-help').textContent=desktopMode?'Choose your music library, then choose its Playlists folder. Local drives, mapped drives, and UNC shares are supported.':'Choose from folders that Docker has made available to this app. To use a different drive letter or UNC share, change the host folder in the app’s Docker configuration first.';
+    $('#desktop-key-setting').classList.toggle('hidden',!desktopMode);
+    $('#lastfm-key-status').textContent=status.lastfm_configured?'Configured':'Not configured';
     $('#track-count').textContent=Number(status.track_count).toLocaleString();
     const total=Number(status.scan.total||status.last_scan_count||status.track_count||0);
     const scanned=Number(status.scan.scanned||0);
@@ -57,7 +63,7 @@ async function loadStatus(){
       bar.classList.toggle('unknown',!total); dot.className='status-dot scanning';
       clearTimeout(scanTimer); scanTimer=setTimeout(loadStatus,1500);
     }else{
-      $('#scan').disabled=false; bar.classList.remove('unknown');
+      $('#scan').disabled=desktopMode&&!rootsConfigured; bar.classList.remove('unknown');
       if(status.scan.error){
         $('#scan-note').textContent=`Scan stopped: ${status.scan.error}`; $('#scan-percent').textContent=''; bar.style.width='0'; dot.className='status-dot failed';
       }else if(status.last_scan){
@@ -66,7 +72,7 @@ async function loadStatus(){
         $('#scan-note').textContent=`Scan complete — ${Number(status.track_count).toLocaleString()} tracks indexed${details}`;
         $('#scan-percent').textContent='100%'; bar.style.width='100%'; dot.className='status-dot complete';
       }else{
-        $('#scan-note').textContent='Not scanned yet'; $('#scan-percent').textContent=''; bar.style.width='0'; dot.className='status-dot';
+        $('#scan-note').textContent=desktopMode&&!rootsConfigured?'Choose both folders in Settings first':'Not scanned yet'; $('#scan-percent').textContent=''; bar.style.width='0'; dot.className='status-dot';
       }
     }
     const enrich=status.enrichment||{};
@@ -78,7 +84,12 @@ async function loadStatus(){
   }catch{ $('#scan-note').textContent='Could not read app status'; }
 }
 
-$('#scan').addEventListener('click',async()=>{ $('#scan').disabled=true; await fetch('/api/scan',{method:'POST'}); loadStatus(); });
+$('#scan').addEventListener('click',async()=>{
+  $('#scan').disabled=true;
+  const response=await fetch('/api/scan',{method:'POST'}); const data=await response.json();
+  if(!response.ok)setMessage(data.error||'Could not start the scan.',true);
+  loadStatus();
+});
 
 async function openFolderBrowser(kind,path=''){
   browserKind=kind; browserPath=path;
@@ -103,7 +114,25 @@ $('#settings').addEventListener('click',()=>{
 $('#close-settings').addEventListener('click',()=>$('#settings-dialog').close());
 $('#cancel-settings').addEventListener('click',()=>$('#settings-dialog').close());
 $('#settings-dialog').addEventListener('close',()=>{ $('#folder-browser').classList.add('hidden'); loadStatus(); });
-$$('[data-browse-kind]').forEach(button=>button.addEventListener('click',()=>openFolderBrowser(button.dataset.browseKind,folderDraft[`${button.dataset.browseKind==='music'?'music':'playlist'}_subpath`]||'')));
+async function chooseDesktopFolder(kind){
+  const prefix=kind==='music'?'music':'playlist';
+  $('#settings-message').className='settings-message'; $('#settings-message').textContent='Opening the Windows folder picker…';
+  try{
+    if(!window.pywebview?.api?.choose_folder)throw new Error('The Windows folder picker is not ready. Close Settings and try again.');
+    const chosen=await window.pywebview.api.choose_folder(folderDraft[`${prefix}_display`]||'');
+    if(!chosen){ $('#settings-message').textContent=''; return; }
+    const response=await fetch('/api/settings/desktop-roots',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,path:chosen})});
+    const data=await response.json(); if(!response.ok)throw new Error(data.error||'Could not save that folder.');
+    folderDraft={...folderDraft,...data.folders}; rootsConfigured=data.roots_configured;
+    $('#music-folder-display').textContent=folderDraft.music_display; $('#playlist-folder-display').textContent=folderDraft.playlist_display;
+    $('#settings-message').textContent=kind==='music'&&!rootsConfigured?'Music library selected. Now choose its Playlists folder.':'Folder selected.';
+    await loadStatus();
+  }catch(error){ $('#settings-message').className='settings-message error'; $('#settings-message').textContent=error.message; }
+}
+$$('[data-browse-kind]').forEach(button=>button.addEventListener('click',()=>{
+  const kind=button.dataset.browseKind;
+  if(desktopMode)chooseDesktopFolder(kind); else openFolderBrowser(kind,folderDraft[`${kind==='music'?'music':'playlist'}_subpath`]||'');
+}));
 $('#folder-up').addEventListener('click',event=>openFolderBrowser(browserKind,event.currentTarget.dataset.parent||''));
 $('#folder-list').addEventListener('click',event=>{ const row=event.target.closest('[data-folder-path]'); if(row)openFolderBrowser(browserKind,row.dataset.folderPath); });
 $('#select-folder').addEventListener('click',()=>{
@@ -113,6 +142,7 @@ $('#select-folder').addEventListener('click',()=>{
   $('#folder-browser').classList.add('hidden');
 });
 $('#save-settings').addEventListener('click',async()=>{
+  if(desktopMode){ $('#settings-dialog').close(); return; }
   const button=$('#save-settings'); button.disabled=true; $('#settings-message').className='settings-message'; $('#settings-message').textContent='Saving folder settings…';
   try{
     const response=await fetch('/api/settings/folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({music_subpath:folderDraft.music_subpath,playlist_subpath:folderDraft.playlist_subpath})});
@@ -122,6 +152,20 @@ $('#save-settings').addEventListener('click',async()=>{
   }catch(error){ $('#settings-message').className='settings-message error'; $('#settings-message').textContent=error.message; }
   finally{ button.disabled=false; }
 });
+
+async function updateLastfmKey(remove=false){
+  $('#settings-message').className='settings-message'; $('#settings-message').textContent=remove?'Removing API key…':'Saving API key…';
+  try{
+    if(!window.pywebview?.api?.save_lastfm_key)throw new Error('Secure Windows storage is not ready. Close Settings and try again.');
+    const result=await window.pywebview.api.save_lastfm_key(remove?'':$('#lastfm-key').value);
+    if(!result.ok)throw new Error(result.error||'Could not save the API key.');
+    $('#lastfm-key').value=''; $('#lastfm-key-status').textContent=result.configured?'Configured':'Not configured';
+    $('#settings-message').textContent=result.configured?'Last.fm API key saved securely.':'Last.fm API key removed.';
+    await loadStatus();
+  }catch(error){ $('#settings-message').className='settings-message error'; $('#settings-message').textContent=error.message; }
+}
+$('#save-lastfm-key').addEventListener('click',()=>updateLastfmKey(false));
+$('#remove-lastfm-key').addEventListener('click',()=>updateLastfmKey(true));
 
 $('#playlists').addEventListener('click',async event=>{
   const button=event.target.closest('[data-playlist]'); if(!button)return;

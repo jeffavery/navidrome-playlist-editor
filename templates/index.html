@@ -17,7 +17,7 @@
   </header>
   <dialog id="settings-dialog" aria-labelledby="settings-title">
     <div class="dialog-head"><div><p class="eyebrow">SETTINGS</p><h2 id="settings-title">Library folders</h2></div><button id="close-settings" class="icon-button" aria-label="Close settings">×</button></div>
-    <p class="settings-help">Choose from folders that Docker has made available to this app. To use a different drive letter or UNC share, change the host folder in the app's Docker configuration first.</p>
+    <p id="settings-help" class="settings-help">Choose from folders that Docker has made available to this app. To use a different drive letter or UNC share, change the host folder in the app's Docker configuration first.</p>
     <div class="folder-setting">
       <div><strong>Music library</strong><small id="music-folder-display">Loading…</small></div>
       <button type="button" class="quiet" data-browse-kind="music">Choose folder</button>
@@ -31,6 +31,11 @@
       <code id="folder-browser-path"></code>
       <div id="folder-list" class="folder-list"></div>
       <button id="select-folder" type="button" class="primary">Use this folder</button>
+    </div>
+    <div id="desktop-key-setting" class="desktop-key-setting hidden">
+      <div><strong>Last.fm API key</strong><small id="lastfm-key-status">Not configured</small></div>
+      <div class="desktop-key-controls"><input id="lastfm-key" type="password" autocomplete="off" placeholder="Paste an API key"><button id="save-lastfm-key" type="button" class="quiet">Save key</button><button id="remove-lastfm-key" type="button" class="quiet">Remove</button></div>
+      <small>Optional. Windows stores it securely in Credential Manager. It enables Listener Favorites and seed-song similarity.</small>
     </div>
     <p id="settings-message" class="settings-message" role="status" aria-live="polite"></p>
     <div class="dialog-actions"><button id="cancel-settings" type="button" class="quiet">Cancel</button><button id="save-settings" type="button" class="primary">Save settings</button></div>

@@ -23,6 +23,8 @@ class FolderAndPlaylistTests(unittest.TestCase):
         app.MUSIC_HOST_PATH = r"G:\Music"
         app.PLAYLIST_HOST_PATH = r"G:\Music\Playlists"
         app.PLAYLIST_LIBRARY_PATH = "Playlists"
+        app.DESKTOP_MODE = False
+        app.DESKTOP_SETTINGS_PATH = self.data / "desktop-settings.json"
         app.scan_state.update(running=False, scanned=0, indexed=0, total=0, changed=0,
                               removed=0, error=None, started=None, finished=None, phase="idle")
         app.enrichment_state.update(running=False, checked=0, enriched=0, error=None)
@@ -83,6 +85,42 @@ class FolderAndPlaylistTests(unittest.TestCase):
         recoveries = list(app.DELETED_PLAYLIST_ROOT.glob("*--Road Songs.m3u8"))
         self.assertEqual(len(recoveries), 1)
         self.assertEqual(recoveries[0].read_text(), "#EXTM3U\n../../Rock/Artist/song.flac\n")
+
+    def test_desktop_folder_selection_and_relative_playlist_paths(self):
+        desktop_playlists = self.music / "Playlists"
+        desktop_playlists.mkdir()
+        app.DESKTOP_MODE = True
+
+        response = self.client.post("/api/settings/desktop-roots", json={
+            "kind": "music", "path": str(self.music),
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json["roots_configured"])
+
+        response = self.client.post("/api/settings/desktop-roots", json={
+            "kind": "playlists", "path": str(desktop_playlists),
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["roots_configured"])
+
+        self.add_track()
+        response = self.client.post("/api/playlists", json={
+            "name": "Desktop Mix", "paths": ["Artist/song.flac"],
+        })
+        self.assertEqual(response.status_code, 200)
+        playlist = desktop_playlists / "Desktop Mix.m3u8"
+        self.assertEqual(playlist.read_text(), "#EXTM3U\n../Artist/song.flac\n")
+
+    def test_desktop_playlist_folder_must_be_inside_music_library(self):
+        app.DESKTOP_MODE = True
+        self.client.post("/api/settings/desktop-roots", json={
+            "kind": "music", "path": str(self.music),
+        })
+        response = self.client.post("/api/settings/desktop-roots", json={
+            "kind": "playlists", "path": str(self.playlists),
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("inside", response.json["error"])
 
 
 if __name__ == "__main__":

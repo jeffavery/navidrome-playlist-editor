@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 import os
 import posixpath
 import re
@@ -21,9 +22,11 @@ from flask import Flask, jsonify, render_template, request
 from mutagen import File as MutagenFile
 
 APP = Flask(__name__)
+DESKTOP_MODE = os.getenv("DESKTOP_MODE", "").strip() == "1"
 MUSIC_ROOT = Path(os.getenv("MUSIC_ROOT", "/music"))
 PLAYLIST_ROOT = Path(os.getenv("PLAYLIST_ROOT", "/playlists"))
 DB_PATH = Path(os.getenv("DATABASE_PATH", "/data/library.db"))
+DESKTOP_SETTINGS_PATH = Path(os.getenv("DESKTOP_SETTINGS_PATH", DB_PATH.parent / "desktop-settings.json"))
 DELETED_PLAYLIST_ROOT = DB_PATH.parent / "deleted-playlists"
 MUSIC_HOST_PATH = os.getenv("MUSIC_HOST_PATH", "Music library")
 PLAYLIST_HOST_PATH = os.getenv("PLAYLIST_HOST_PATH", "Playlists folder")
@@ -129,6 +132,8 @@ def mounted_folder(root, relative=""):
 
 
 def folder_settings():
+    if DESKTOP_MODE:
+        return {"music_subpath": "", "playlist_subpath": ""}
     with database() as db:
         settings = dict(db.execute(
             "SELECT key,value FROM settings WHERE key IN ('music_subpath','playlist_subpath')"
@@ -140,6 +145,8 @@ def folder_settings():
 
 
 def active_folders():
+    if DESKTOP_MODE and not desktop_roots_configured():
+        raise ValueError("Choose your music library and Playlists folder in Settings first.")
     settings = folder_settings()
     return (
         mounted_folder(MUSIC_ROOT, settings["music_subpath"]),
@@ -153,6 +160,43 @@ def display_folder(host_root, relative):
         return host_root
     separator = "\\" if "\\" in host_root and "/" not in host_root else "/"
     return host_root.rstrip("/\\") + separator + relative.replace("/", separator)
+
+
+def read_desktop_settings():
+    if not DESKTOP_MODE or not DESKTOP_SETTINGS_PATH.is_file():
+        return {}
+    try:
+        payload = json.loads(DESKTOP_SETTINGS_PATH.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def desktop_roots_configured():
+    if not DESKTOP_MODE:
+        return True
+    settings = read_desktop_settings()
+    music = Path(settings.get("music_root", "")) if settings.get("music_root") else None
+    playlists = Path(settings.get("playlist_root", "")) if settings.get("playlist_root") else None
+    if not music or not playlists or not music.is_dir() or not playlists.is_dir():
+        return False
+    try:
+        playlists.resolve().relative_to(music.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def save_desktop_settings(settings):
+    DESKTOP_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = DESKTOP_SETTINGS_PATH.with_suffix(".tmp")
+    temporary.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(DESKTOP_SETTINGS_PATH)
+
+
+def desktop_playlist_entry(relative_track):
+    track = MUSIC_ROOT.joinpath(*relative_track.split("/"))
+    return os.path.relpath(track, PLAYLIST_ROOT).replace("\\", "/")
 
 
 def norm(value):
@@ -705,19 +749,26 @@ def status():
         playlists = sorted((p.name for p in playlist_root.glob("*.m3u8") if p.is_file()), key=str.casefold)
     except (OSError, ValueError):
         folder_config = folder_settings()
+    desktop_settings = read_desktop_settings()
+    roots_configured = desktop_roots_configured()
+    music_display = desktop_settings.get("music_root", "Not selected") if DESKTOP_MODE else display_folder(MUSIC_HOST_PATH, folder_config["music_subpath"])
+    playlist_display = desktop_settings.get("playlist_root", "Not selected") if DESKTOP_MODE else display_folder(PLAYLIST_HOST_PATH, folder_config["playlist_subpath"])
     return jsonify(track_count=count, last_scan=settings.get("last_scan"),
                    last_scan_count=settings.get("last_scan_count"), scan=scan_state,
                    enrichment=enrichment_state, musicbrainz_remaining=settings.get("musicbrainz_remaining"),
                    playlists=playlists, lastfm_configured=bool(os.getenv("LASTFM_API_KEY", "").strip()),
+                   desktop_mode=DESKTOP_MODE, roots_configured=roots_configured,
                    folders={
                        **folder_config,
-                       "music_display": display_folder(MUSIC_HOST_PATH, folder_config["music_subpath"]),
-                       "playlist_display": display_folder(PLAYLIST_HOST_PATH, folder_config["playlist_subpath"]),
+                       "music_display": music_display,
+                       "playlist_display": playlist_display,
                    })
 
 
 @APP.get("/api/folders")
 def browse_folders():
+    if DESKTOP_MODE:
+        return jsonify(error="Use the Windows folder picker in the standalone app."), 400
     kind = request.args.get("kind", "")
     if kind not in {"music", "playlists"}:
         return jsonify(error="Choose either the music or playlists location."), 400
@@ -747,6 +798,8 @@ def browse_folders():
 
 @APP.post("/api/settings/folders")
 def save_folder_settings():
+    if DESKTOP_MODE:
+        return jsonify(error="Use the Windows folder picker in the standalone app."), 400
     if scan_state["running"] or enrichment_state["running"]:
         return jsonify(error="Wait for the current library task to finish before changing folders."), 409
     payload = request.get_json(force=True) or {}
@@ -784,6 +837,66 @@ def save_folder_settings():
     )
 
 
+@APP.post("/api/settings/desktop-roots")
+def save_desktop_roots():
+    global MUSIC_ROOT, PLAYLIST_ROOT, MUSIC_HOST_PATH, PLAYLIST_HOST_PATH
+    if not DESKTOP_MODE:
+        return jsonify(error="This setting is only available in the Windows standalone app."), 404
+    if scan_state["running"] or enrichment_state["running"]:
+        return jsonify(error="Wait for the current library task to finish before changing folders."), 409
+    payload = request.get_json(force=True) or {}
+    kind = payload.get("kind")
+    if kind not in {"music", "playlists"}:
+        return jsonify(error="Choose either the music or playlists location."), 400
+    raw_path = str(payload.get("path", "")).strip()
+    chosen = Path(raw_path)
+    if not raw_path or not chosen.is_absolute() or not chosen.is_dir():
+        return jsonify(error="Choose an existing folder."), 400
+    chosen = chosen.resolve()
+    settings = read_desktop_settings()
+    library_changed = False
+    if kind == "music":
+        old_music = settings.get("music_root", "")
+        settings["music_root"] = str(chosen)
+        library_changed = os.path.normcase(old_music) != os.path.normcase(str(chosen))
+        current_playlists = settings.get("playlist_root")
+        if current_playlists:
+            try:
+                Path(current_playlists).resolve().relative_to(chosen)
+            except (OSError, ValueError):
+                settings.pop("playlist_root", None)
+    else:
+        current_music = settings.get("music_root")
+        if not current_music or not Path(current_music).is_dir():
+            return jsonify(error="Choose the music library first."), 400
+        try:
+            chosen.relative_to(Path(current_music).resolve())
+        except ValueError:
+            return jsonify(error="Choose a Playlists folder inside the selected music library."), 400
+        if not os.access(chosen, os.W_OK):
+            return jsonify(error="The selected Playlists folder is not writable."), 400
+        settings["playlist_root"] = str(chosen)
+    try:
+        save_desktop_settings(settings)
+    except OSError as exc:
+        return jsonify(error=f"Could not save the folder setting: {exc}"), 500
+    MUSIC_ROOT = Path(settings.get("music_root", DB_PATH.parent / "unconfigured-music"))
+    PLAYLIST_ROOT = Path(settings.get("playlist_root", DB_PATH.parent / "unconfigured-playlists"))
+    MUSIC_HOST_PATH = settings.get("music_root", "Not selected")
+    PLAYLIST_HOST_PATH = settings.get("playlist_root", "Not selected")
+    if library_changed:
+        with database() as db:
+            db.execute("DELETE FROM tracks")
+            db.execute("DELETE FROM settings WHERE key IN ('last_scan','last_scan_count','musicbrainz_remaining')")
+        scan_state.update(running=False, scanned=0, indexed=0, total=0, changed=0, removed=0,
+                          error=None, started=None, finished=None, phase="idle")
+    return jsonify(message="Folder selected.", library_changed=library_changed,
+                   roots_configured=desktop_roots_configured(),
+                   folders={"music_subpath": "", "playlist_subpath": "",
+                            "music_display": settings.get("music_root", "Not selected"),
+                            "playlist_display": settings.get("playlist_root", "Not selected")})
+
+
 @APP.get("/api/tracks/search")
 def search_tracks():
     term = request.args.get("q", "").strip()[:100]
@@ -806,6 +919,8 @@ def search_tracks():
 
 @APP.post("/api/scan")
 def scan():
+    if DESKTOP_MODE and not desktop_roots_configured():
+        return jsonify(error="Choose your music library and Playlists folder in Settings first."), 400
     if scan_state["running"]:
         return jsonify(scan=scan_state), 202
     threading.Thread(target=run_scan, daemon=True).start()
@@ -903,11 +1018,14 @@ def create_playlist():
     temporary = playlist_root / f".{name}.{os.getpid()}.tmp"
     try:
         playlist_root.mkdir(parents=True, exist_ok=True)
-        logical_playlist_folder = posixpath.join(PLAYLIST_LIBRARY_PATH, folder_config["playlist_subpath"])
-        entries = (
-            posixpath.relpath(posixpath.join(folder_config["music_subpath"], path), logical_playlist_folder)
-            for path in selected
-        )
+        if DESKTOP_MODE:
+            entries = (desktop_playlist_entry(path) for path in selected)
+        else:
+            logical_playlist_folder = posixpath.join(PLAYLIST_LIBRARY_PATH, folder_config["playlist_subpath"])
+            entries = (
+                posixpath.relpath(posixpath.join(folder_config["music_subpath"], path), logical_playlist_folder)
+                for path in selected
+            )
         content = "#EXTM3U\n" + "".join(f"{entry}\n" for entry in entries)
         temporary.write_text(content, encoding="utf-8", newline="\n")
         temporary.replace(target)

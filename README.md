@@ -21,6 +21,22 @@ writes portable `.m3u8` playlists that Navidrome can import during its next scan
 The editor never downloads music. It only includes tracks found in the mounted
 library index.
 
+## Windows standalone edition
+
+A portable Windows build is available for people who do not want to run a
+Docker container. Download the Windows build artifact, extract the entire ZIP,
+and double-click `Navidrome Playlist Editor.exe`. Keep the `_internal` folder
+beside the executable.
+
+The standalone edition has native folder pickers for drive letters, mapped
+drives, and UNC shares. Choose the music library first, then choose a Playlists
+folder inside it. Its index and settings are stored in
+`%LOCALAPPDATA%\NavidromePlaylistEditor`; an optional Last.fm key is stored in
+Windows Credential Manager.
+
+No Python, Docker, Node.js, installer, or administrator access is required.
+See `START HERE.md` in the Windows ZIP for the short setup guide.
+
 ## Quick start
 
 Requirements: Docker with Compose and a music folder already used by Navidrome.
