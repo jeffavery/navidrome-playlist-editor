@@ -21,6 +21,9 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Build portable application
         run: python -m PyInstaller --noconfirm --clean desktop.spec
+      - name: Smoke-test packaged executable
+        shell: pwsh
+        run: '& "dist\Navidrome Playlist Editor\Navidrome Playlist Editor.exe" --self-test'
       - name: Add the quick-start guide
         shell: pwsh
         run: Copy-Item "START HERE.md" "dist\Navidrome Playlist Editor\START HERE.md"

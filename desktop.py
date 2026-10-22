@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from desktop_support import configure_environment, save_lastfm_key
@@ -47,4 +48,10 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        app.init_db()
+        with app.APP.test_client() as client:
+            if client.get("/").status_code != 200 or client.get("/health").status_code != 200:
+                raise SystemExit(1)
+        raise SystemExit(0)
     main()
