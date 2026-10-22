@@ -1,4 +1,3 @@
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,7 +60,7 @@ class FolderAndPlaylistTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json["library_changed"])
-        with sqlite3.connect(app.DB_PATH) as db:
+        with app.database() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM tracks").fetchone()[0], 0)
             self.assertIsNone(db.execute("SELECT value FROM settings WHERE key='last_scan'").fetchone())
         self.assertTrue((self.music / "Rock").is_dir())
